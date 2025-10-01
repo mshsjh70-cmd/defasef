@@ -9,7 +9,6 @@
     <title>Player - Modern Music Player</title>
     <link rel="icon" type="image/x-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎵</text></svg>">
     <style>
-        /* جميع الأنماط الحالية تبقى كما هي */
         :root {
             --primary-color: #8B5CF6;
             --primary-gradient: linear-gradient(135deg, #8B5CF6, #6366F1);
@@ -2474,7 +2473,7 @@
                 this.loadSettings();
                 this.initApp();
                 this.initAudioContext();
-                this.autoRequestPermission();
+                this.checkPermissionStatus(); // الحل الجديد: التحقق من حالة الصلاحية
             }
 
             cacheElements() {
@@ -2704,7 +2703,7 @@
                 // Search
                 this.searchInput.addEventListener('input', (e) => this.handleSearch(e));
 
-                // File access - Auto-select all MP3 files
+                // File access - الحل الجديد: التحقق من الصلاحية أولاً
                 this.requestPermissionBtn.addEventListener('click', () => this.requestFileAccess());
                 this.fileAccess.addEventListener('change', (e) => this.handleFileAccess(e));
 
@@ -2715,6 +2714,28 @@
                 this.audio.addEventListener('timeupdate', () => this.updateProgress());
                 this.audio.addEventListener('loadedmetadata', () => this.updateDuration());
                 this.audio.addEventListener('ended', () => this.handleSongEnded());
+
+                // الحل الجديد: استعادة الحالة عند تحميل الصفحة
+                window.addEventListener('load', () => this.restoreAppState());
+            }
+
+            // الحل الجديد: التحقق من حالة الصلاحية عند بدء التشغيل
+            checkPermissionStatus() {
+                const permissionGranted = localStorage.getItem('filePermissionGranted');
+                const hasSongs = localStorage.getItem('savedSongs');
+                
+                if (permissionGranted === 'true' && hasSongs) {
+                    this.filePermission.style.display = 'none';
+                    this.loadSongsFromStorage();
+                } else {
+                    this.filePermission.style.display = 'block';
+                }
+            }
+
+            // الحل الجديد: استعادة حالة التطبيق
+            restoreAppState() {
+                this.loadSongsFromStorage();
+                this.restorePlaybackState();
             }
 
             initApp() {
@@ -2724,9 +2745,6 @@
                 this.initPlaylists();
                 this.initAlbums();
                 this.switchScreen('home');
-                
-                // Load songs from storage on app start
-                this.loadSongsFromStorage();
             }
 
             initAudioContext() {
@@ -2760,20 +2778,6 @@
                     console.log('Audio context initialized successfully');
                 } catch (error) {
                     console.error('Error initializing audio context:', error);
-                }
-            }
-
-            // Auto request permission on first load
-            autoRequestPermission() {
-                const hasPermission = localStorage.getItem('filePermissionGranted');
-                if (!hasPermission) {
-                    // Show permission request on first load
-                    setTimeout(() => {
-                        this.requestFileAccess();
-                    }, 1000);
-                } else {
-                    // Hide permission section if already granted
-                    this.filePermission.style.display = 'none';
                 }
             }
 
@@ -3757,11 +3761,11 @@
                 });
             }
 
-            // File access - Auto-select all MP3 files and save to storage
+            // File access - الحل الجديد: حفظ حالة الصلاحية
             handleFileAccess(e) {
                 const files = e.target.files;
                 if (files.length > 0) {
-                    // Save permission status
+                    // الحل الجديد: حفظ حالة الصلاحية
                     localStorage.setItem('filePermissionGranted', 'true');
                     this.filePermission.style.display = 'none';
                     
@@ -3927,6 +3931,39 @@
                 }
             }
 
+            // الحل الجديد: استعادة حالة التشغيل
+            restorePlaybackState() {
+                try {
+                    const playbackState = localStorage.getItem('playbackState');
+                    if (playbackState) {
+                        const state = JSON.parse(playbackState);
+                        
+                        // Only restore if it's recent (within 1 hour) and we have songs
+                        if (Date.now() - state.timestamp < 3600000 && this.songs.length > 0) {
+                            this.currentSongIndex = state.currentSongIndex || 0;
+                            this.audio.volume = state.volume || 1;
+                            
+                            if (state.currentSongIndex !== undefined) {
+                                const song = this.songs[this.currentSongIndex];
+                                if (song) {
+                                    this.currentSongImg.src = song.cover;
+                                    this.currentSongTitle.textContent = song.title;
+                                    this.currentSongArtist.textContent = song.artist;
+                                    
+                                    if (state.isPlaying && song.audio) {
+                                        this.audio.src = song.audio;
+                                        this.audio.currentTime = state.currentTime || 0;
+                                        // Don't auto-play - let user decide when to play
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error restoring playback state:', error);
+                }
+            }
+
             // Save playback state
             savePlaybackState() {
                 try {
@@ -3934,7 +3971,8 @@
                         currentSongIndex: this.currentSongIndex,
                         currentTime: this.audio.currentTime,
                         isPlaying: this.isPlaying,
-                        volume: this.audio.volume
+                        volume: this.audio.volume,
+                        timestamp: Date.now()
                     };
                     localStorage.setItem('playbackState', JSON.stringify(playbackState));
                 } catch (error) {
